@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -15,7 +16,7 @@ jobs:
         with:
           node-version: '20'
 
-      # Instala NEWMAN v6 (compatível com htmlextra) localmente + retries
+      # Instala NEWMAN v6 + htmlextra localmente (com retries para evitar 429)
       - name: Install newman + htmlextra (local, with retries)
         run: |
           echo '{}' > package.json
@@ -25,11 +26,11 @@ jobs:
           npm config set fetch-retry-maxtimeout 120000
           npm i --no-audit --no-fund newman@^6 newman-reporter-htmlextra@^1
 
-      # Sobe a ServeRest no runner
+      # Sobe a ServeRest localmente
       - name: Start ServeRest
         run: npx -y serverest@latest &
 
-      # Espera a API responder
+      # Aguarda a API responder
       - name: Wait for API to be ready
         run: |
           for i in {1..30}; do
@@ -40,7 +41,7 @@ jobs:
           done
           echo "API did not start in time"; exit 1
 
-      # Roda a collection e exporta como index.html (abrir direto no Pages)
+      # Executa a collection e exporta o relatório como index.html
       - name: Run Newman (export as index.html)
         run: |
           mkdir -p reports
@@ -50,11 +51,12 @@ jobs:
             --reporter-htmlextra-title "ServeRest - Execução (CI)" \
             --reporter-htmlextra-darkTheme
 
+      # Publica a PASTA inteira como artifact (contendo index.html)
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
           name: newman-report
-          path: reports/index.html
+          path: reports
 
   deploy:
     needs: test
@@ -65,22 +67,24 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - uses: actions/checkout@v4
 
+      # Baixa o artifact para ./site (contendo ./site/index.html)
       - name: Download report artifact
         uses: actions/download-artifact@v4
         with:
           name: newman-report
-          # Altera o path para um diretório temporário
-          path: report_download
+          path: site
 
+      # Faz upload para o Pages
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Especifica o caminho completo do arquivo
-          path: report_download/reports
+          path: site
 
+      # Realiza o deploy
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
