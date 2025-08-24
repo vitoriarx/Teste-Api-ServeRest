@@ -2,46 +2,60 @@ name: Newman CI
 
 on:
   push:
-    branches: [ main, master ]   # ← inclui master
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Newman + reporter
-        run: npm i -g newman newman-reporter-htmlextra
+      # Evita 429 instalando LOCALMENTE (sem -g) e com retries
+      - name: Prepare Node env (install newman locally with retries)
+        run: |
+          echo '{}' > package.json
+          npm config set fetch-retries 5
+          npm config set fetch-retry-factor 2
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+          npm i --no-audit --no-fund newman@5 newman-reporter-htmlextra@1
 
-      # Sobe a ServeRest localmente para o Newman bater em http://localhost:3000
+      # Sobe a API ServeRest em background
       - name: Start ServeRest
         run: npx -y serverest@latest &
 
+      # Aguarda a API ficar disponível
       - name: Wait for API to be ready
         run: |
           for i in {1..30}; do
             if curl -fsS http://localhost:3000/usuarios >/dev/null; then
-              echo "API UP"; break
+              echo "API UP"; exit 0
             fi
-            echo "waiting API..."; sleep 2
+            echo "waiting API... ($i)"; sleep 2
           done
+          echo "API did not start in time"; exit 1
 
+      # Executa os testes e exporta como index.html (para abrir direto no Pages)
       - name: Run Newman (export as index.html)
         run: |
           mkdir -p reports
-          newman run ./postman/TesteApiServeRest.postman_collection.json \
+          npx newman run ./postman/TesteApiServeRest.postman_collection.json \
             -r htmlextra \
             --reporter-htmlextra-export ./reports/index.html \
             --reporter-htmlextra-title "ServeRest - Execução (CI)" \
             --reporter-htmlextra-darkTheme
 
+      # Apenas para depuração se precisar
       - name: Show what will be published
         run: ls -la reports
 
+      # Salva também como artifact do run
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
@@ -55,7 +69,7 @@ jobs:
       pages: write
       id-token: write
     environment:
-      name: github-pages        # ← mostra o link do Pages no run
+      name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
