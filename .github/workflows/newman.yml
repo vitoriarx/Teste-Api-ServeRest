@@ -2,16 +2,14 @@ name: Newman CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]   # ← inclui master
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -19,7 +17,7 @@ jobs:
       - name: Install Newman + reporter
         run: npm i -g newman newman-reporter-htmlextra
 
-      # 🔹 Sobe a API ServeRest em http://localhost:3000
+      # Sobe a ServeRest localmente para o Newman bater em http://localhost:3000
       - name: Start ServeRest
         run: npx -y serverest@latest &
 
@@ -32,20 +30,23 @@ jobs:
             echo "waiting API..."; sleep 2
           done
 
-      - name: Run Newman
+      - name: Run Newman (export as index.html)
         run: |
           mkdir -p reports
           newman run ./postman/TesteApiServeRest.postman_collection.json \
             -r htmlextra \
-            --reporter-htmlextra-export ./reports/serverest_report.html \
+            --reporter-htmlextra-export ./reports/index.html \
             --reporter-htmlextra-title "ServeRest - Execução (CI)" \
             --reporter-htmlextra-darkTheme
+
+      - name: Show what will be published
+        run: ls -la reports
 
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
           name: newman-report
-          path: reports/serverest_report.html
+          path: reports/index.html
 
   deploy:
     needs: test
@@ -53,13 +54,26 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    environment:
+      name: github-pages        # ← mostra o link do Pages no run
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+
+      - name: Download report artifact
+        uses: actions/download-artifact@v4
         with:
           name: newman-report
           path: reports
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Show what will be deployed
+        run: ls -la reports
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: reports
-      - uses: actions/deploy-pages@v4
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
