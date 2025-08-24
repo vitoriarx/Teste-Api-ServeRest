@@ -1,0 +1,65 @@
+name: Newman CI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Newman + reporter
+        run: npm i -g newman newman-reporter-htmlextra
+
+      # 🔹 Sobe a API ServeRest em http://localhost:3000
+      - name: Start ServeRest
+        run: npx -y serverest@latest &
+
+      - name: Wait for API to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3000/usuarios >/dev/null; then
+              echo "API UP"; break
+            fi
+            echo "waiting API..."; sleep 2
+          done
+
+      - name: Run Newman
+        run: |
+          mkdir -p reports
+          newman run ./postman/TesteApiServeRest.postman_collection.json \
+            -r htmlextra \
+            --reporter-htmlextra-export ./reports/serverest_report.html \
+            --reporter-htmlextra-title "ServeRest - Execução (CI)" \
+            --reporter-htmlextra-darkTheme
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: reports/serverest_report.html
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: newman-report
+          path: reports
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: reports
+      - uses: actions/deploy-pages@v4
